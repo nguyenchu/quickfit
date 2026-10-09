@@ -1,12 +1,13 @@
 import { Image } from 'expo-image';
 import { Link, Stack, useLocalSearchParams } from 'expo-router';
 import * as Speech from 'expo-speech';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { type HomeProgram, homePrograms, findMove, findProgram } from '@/data/home-program';
 import { homeMoveImages, workoutImages } from '@/data/images';
+import { recordWorkoutCompletion } from '@/lib/progress';
 import { radius, space, useTheme } from '@/lib/theme';
 
 type SessionStep = {
@@ -50,6 +51,9 @@ function GuidedProgram({ program }: { program: HomeProgram }) {
   const [stepIndex, setStepIndex] = useState(0);
   const [remaining, setRemaining] = useState(steps[0]?.duration ?? 0);
   const [isRunning, setIsRunning] = useState(false);
+  const [isRecordingCompletion, setIsRecordingCompletion] = useState(false);
+  const stepIndexRef = useRef(0);
+  const lastTickAt = useRef<number | null>(null);
   const currentStep = steps[stepIndex];
   const isComplete = stepIndex >= steps.length;
   const totalSteps = steps.length;
@@ -63,10 +67,22 @@ function GuidedProgram({ program }: { program: HomeProgram }) {
   const previousProgram = homePrograms[currentIndex - 1];
   const nextProgram = homePrograms[currentIndex + 1];
 
+  const recordCompletion = () => {
+    if (isRecordingCompletion) return;
+
+    setIsRecordingCompletion(true);
+    void recordWorkoutCompletion(program.id).catch(() => {
+      setIsRecordingCompletion(false);
+    });
+  };
+
   useEffect(() => {
     setStepIndex(0);
+    stepIndexRef.current = 0;
     setRemaining(steps[0]?.duration ?? 0);
     setIsRunning(false);
+    setIsRecordingCompletion(false);
+    lastTickAt.current = null;
   }, [program.id, steps]);
 
   useEffect(() => {
@@ -80,22 +96,54 @@ function GuidedProgram({ program }: { program: HomeProgram }) {
   }, [currentStep, isComplete]);
 
   useEffect(() => {
-    if (!isRunning || isComplete) return;
+    if (!isRunning || isComplete) {
+      lastTickAt.current = null;
+      return;
+    }
+
+    lastTickAt.current = Date.now();
 
     const interval = setInterval(() => {
-      setRemaining((value) => {
-        if (value > 1) return value - 1;
+      const now = Date.now();
+      const previousTick = lastTickAt.current ?? now;
+      const elapsedSeconds = Math.floor((now - previousTick) / 1000);
+      if (elapsedSeconds < 1) return;
 
-        setStepIndex((index) => {
-          const nextIndex = index + 1;
+      lastTickAt.current = previousTick + elapsedSeconds * 1000;
+
+      setRemaining((value) => {
+        let secondsToApply = elapsedSeconds;
+        let nextIndex = stepIndexRef.current;
+        let nextRemaining = value;
+
+        while (secondsToApply >= nextRemaining && nextIndex < steps.length) {
+          secondsToApply -= nextRemaining;
+          nextIndex += 1;
+
           if (nextIndex >= steps.length) {
-            setIsRunning(false);
+            nextRemaining = 0;
+            break;
           }
-          return nextIndex;
-        });
-        return 0;
+
+          nextRemaining = steps[nextIndex].duration;
+        }
+
+        if (nextIndex >= steps.length) {
+          stepIndexRef.current = nextIndex;
+          setStepIndex(nextIndex);
+          setIsRunning(false);
+          recordCompletion();
+          return 0;
+        }
+
+        if (nextIndex !== stepIndexRef.current) {
+          stepIndexRef.current = nextIndex;
+          setStepIndex(nextIndex);
+        }
+
+        return nextRemaining - secondsToApply;
       });
-    }, 1000);
+    }, 250);
 
     return () => clearInterval(interval);
   }, [isComplete, isRunning, steps.length]);
@@ -117,15 +165,26 @@ function GuidedProgram({ program }: { program: HomeProgram }) {
   }, [isComplete, isRunning, remaining]);
 
   const nextStep = () => {
-    setStepIndex((index) => Math.min(index + 1, steps.length));
+    lastTickAt.current = Date.now();
+    stepIndexRef.current = Math.min(stepIndexRef.current + 1, steps.length);
+    setStepIndex(stepIndexRef.current);
+
+    if (stepIndexRef.current >= steps.length) {
+      recordCompletion();
+    }
   };
 
   const previousStep = () => {
-    setStepIndex((index) => Math.max(index - 1, 0));
+    lastTickAt.current = Date.now();
+    stepIndexRef.current = Math.max(stepIndexRef.current - 1, 0);
+    setStepIndex(stepIndexRef.current);
   };
 
   const resetWorkout = () => {
+    lastTickAt.current = null;
     setIsRunning(false);
+    setIsRecordingCompletion(false);
+    stepIndexRef.current = 0;
     setStepIndex(0);
     setRemaining(steps[0]?.duration ?? 0);
   };

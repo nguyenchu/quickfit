@@ -1,9 +1,11 @@
 import { Image } from 'expo-image';
-import { Link } from 'expo-router';
+import { Link, useFocusEffect } from 'expo-router';
+import { useCallback, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { homePrograms } from '@/data/home-program';
 import { workoutImages } from '@/data/images';
+import { type WorkoutProgress, loadWorkoutProgress } from '@/lib/progress';
 import { radius, space, useTheme } from '@/lib/theme';
 
 const levelColors: Record<string, string> = {
@@ -14,6 +16,17 @@ const levelColors: Record<string, string> = {
 
 export default function HomeScreen() {
   const t = useTheme();
+  const [progress, setProgress] = useState<WorkoutProgress | null>(null);
+
+  const refreshProgress = useCallback(() => {
+    void loadWorkoutProgress().then(setProgress);
+  }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+    refreshProgress();
+    }, [refreshProgress]),
+  );
 
   return (
     <ScrollView
@@ -21,6 +34,18 @@ export default function HomeScreen() {
       alwaysBounceVertical={false}
       overScrollMode="never">
       <View style={styles.container}>
+        <View style={[styles.progressCard, { backgroundColor: t.card, borderColor: t.border }]}>
+          <Text style={[styles.progressEyebrow, { color: t.accent }]}>YOUR WEEK</Text>
+          <Text style={[styles.progressTitle, { color: t.text }]}>
+            {progress?.completedToday ? 'Today is done. Nice work!' : 'One workout is all you need today.'}
+          </Text>
+          <View style={styles.progressStats}>
+            <ProgressStat label="Today" value={`${progress?.completedToday ?? 0}/1`} color={t.text} muted={t.sub} />
+            <ProgressStat label="Streak" value={`${progress?.streakDays ?? 0} days`} color={t.text} muted={t.sub} />
+            <ProgressStat label="All time" value={`${progress?.totalCompleted ?? 0}`} color={t.text} muted={t.sub} />
+          </View>
+        </View>
+
         <Text style={[styles.intro, { color: t.sub }]}>Pick a workout. Tap one to start.</Text>
 
         {homePrograms.map((program) => (
@@ -56,6 +81,25 @@ export default function HomeScreen() {
   );
 }
 
+function ProgressStat({
+  label,
+  value,
+  color,
+  muted,
+}: {
+  label: string;
+  value: string;
+  color: string;
+  muted: string;
+}) {
+  return (
+    <View style={styles.progressStat}>
+      <Text style={[styles.progressValue, { color }]}>{value}</Text>
+      <Text style={[styles.progressLabel, { color: muted }]}>{label}</Text>
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
@@ -72,6 +116,38 @@ const styles = StyleSheet.create({
     fontSize: 17,
     lineHeight: 24,
     fontWeight: '600',
+  },
+  progressCard: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: radius.lg,
+    gap: space.md,
+    padding: space.lg,
+  },
+  progressEyebrow: {
+    fontSize: 12,
+    fontWeight: '900',
+    letterSpacing: 1,
+  },
+  progressTitle: {
+    fontSize: 24,
+    lineHeight: 30,
+    fontWeight: '900',
+  },
+  progressStats: {
+    flexDirection: 'row',
+    gap: space.sm,
+  },
+  progressStat: {
+    flex: 1,
+    gap: 2,
+  },
+  progressValue: {
+    fontSize: 18,
+    fontWeight: '900',
+  },
+  progressLabel: {
+    fontSize: 12,
+    fontWeight: '700',
   },
   card: {
     borderRadius: radius.lg,
